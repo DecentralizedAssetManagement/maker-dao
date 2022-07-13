@@ -1,4 +1,4 @@
-// DAM: This is not currently used. Instead "clip" is used.
+// This is not currently used. Instead "clip" is used.
 
 // SPDX-License-Identifier: AGPL-3.0-or-later
 

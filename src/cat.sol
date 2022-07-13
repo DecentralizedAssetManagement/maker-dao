@@ -1,4 +1,4 @@
-// DAM: THis is not currently used. Instead the dog is used.
+// This is not currently used. Instead the dog is used.
 
 // SPDX-License-Identifier: AGPL-3.0-or-later
 

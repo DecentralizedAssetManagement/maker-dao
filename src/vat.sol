@@ -42,26 +42,41 @@ contract Vat {
 
     // --- Data ---
     struct Ilk {
-        uint256 Art;   // Total Normalised Debt     [wad]           // DAM: Also takes into account interest when Vat.fold has been called.
-        uint256 rate;  // Accumulated Rates         [ray]           // DAM: The accumulated change in interest since the last time Vat.fold was called.
-        uint256 spot;  // Price with Safety Margin  [ray]           // DAM: For pricing the collateral vs DAI.
-        uint256 line;  // Debt Ceiling              [rad]           // DAM: Total amount of debt/DAI allowed per this collateral type.
-        uint256 dust;  // Urn Debt Floor            [rad]           // DAM: Minimum amount of debt for a specfic vault.
+        // Stores normalised debt only. So art / rate.
+        uint256 Art;   // Total Normalised Debt     [wad]     
+        // The accumulated change in interest since the last time Vat.fold was called.      
+        uint256 rate;  // Accumulated Rates         [ray]           
+        // For pricing the collateral vs DAI.
+        uint256 spot;  // Price with Safety Margin  [ray]  
+        // Total amount of debt/DAI allowed per this collateral type.         
+        uint256 line;  // Debt Ceiling              [rad]      
+        // Minimum amount of debt for a specfic vault.     
+        uint256 dust;  // Urn Debt Floor            [rad]           
     }
     struct Urn {
-        uint256 ink;   // Locked Collateral  [wad]                  // DAM: Total amount of collateral locked of a particular type for this user.
-        uint256 art;   // Normalised Debt    [wad]                  // DAM: Total debt/dai for this user's particular Urn. Note: they may have multiple Urn's one for each collateral type.
+        // Total amount of collateral locked of a particular type for this user.
+        uint256 ink;   // Locked Collateral  [wad]     
+         // Total debt/dai for this user's particular Urn. As with Art above, the amount stored is art/rate.           
+        uint256 art;   // Normalised Debt    [wad]                 
     }
 
-    mapping (bytes32 => Ilk)                       public ilks;             // DAM: Map of collateral id to collateral.
-    mapping (bytes32 => mapping (address => Urn )) public urns;             // DAM: Map of collateral id to address to vault.                   E.g. urns["eth"]["0xblah"]
-    mapping (bytes32 => mapping (address => uint)) public gem;  // [wad]    // DAM: Map of collateral id to address to amount of collateral.    E.g  gem["eth"]["0xfoo"]
-    mapping (address => uint256)                   public dai;  // [rad]    // DAM: DAI balance for each user. Should equal "art" amount?
-    mapping (address => uint256)                   public sin;  // [rad]    // DAM: Total amount of unbacked DAI for the protocol as a whole.
+    // Map of collateral id to collateral.
+    mapping (bytes32 => Ilk)                       public ilks;     
+    // Map of collateral id to address to vault.                   E.g. urns["eth"]["0xblah"]        
+    mapping (bytes32 => mapping (address => Urn )) public urns;       
+    // Map of collateral id to address to amount of collateral.    E.g  gem["eth"]["0xfoo"]      
+    mapping (bytes32 => mapping (address => uint)) public gem;  // [wad]    
+    // DAI balance for each user. Should equal "art" amount?
+    mapping (address => uint256)                   public dai;  // [rad]  
+    // Amount of unbacked DAI per address.  
+    mapping (address => uint256)                   public sin;  // [rad]    
 
-    uint256 public debt;  // Total Dai Issued    [rad]                      // DAM: Sum of issued DAI for each address.
-    uint256 public vice;  // Total Unbacked Dai  [rad]                      // DAM: Sum of unbacked DAI for each address.
-    uint256 public Line;  // Total Debt Ceiling  [rad]                      // DAM: Protocol debt ceiling.
+    // Sum of issued DAI for each address.
+    uint256 public debt;  // Total Dai Issued    [rad]       
+    // Sum of unbacked DAI for each address.               
+    uint256 public vice;  // Total Unbacked Dai  [rad] 
+    // Protocol debt ceiling.                     
+    uint256 public Line;  // Total Debt Ceiling  [rad]                      
     uint256 public live;  // Active Flag
 
     // --- Init ---
@@ -203,22 +218,37 @@ contract Vat {
     // 157.5 dai is substracted from the user's DAI balance.
     // But wait... the interest on 100 DAI over 1 year and 50 DAI over half a year is not 7.5 DAI. It is actually: ((1.05^(6/12)*50)-50)+(1.05*100) = 106.2347538297979904
     // The difference between 106.2347538297979904 and 157.5 is the extra 1.2347538297979904 DAI whch was given to the user when they locked up a further 0.5 eth.
+    // 
+    // The above difference can be explained by the fact that after 6 months when more DAI is withdrawn, Vat.frob is actually called with dart = 50 / 1.024 = 48.828125, 
+    // so that, on line 230 dtab ends up being 48.828125 * 1.024 = 50... and that's how much DAI is issued to the user. so the total art balance after 6 months is
+    // 148.828125, which is the amount which must be multipled by the current accumulated rate to get the capaital and accrued interest. E.g. 148.828125 * 1.05^(6/12) = 152.503
+    // after 6 months. And 148.828125 * 1.05 = 156.26953125 after one year which is pretty much equal to the total amount of interest payable calculated above.
     function frob(bytes32 i, address u, address v, address w, int dink, int dart) external {
         // system is live
         require(live == 1, "Vat/not-live");
 
-        Urn memory urn = urns[i][u];                    // DAM: The user's vault.
-        Ilk memory ilk = ilks[i];                       // DAM: Data for this collateral type.
+        // The user's vault.
+        Urn memory urn = urns[i][u];   
+        // Data for this collateral type.                 
+        Ilk memory ilk = ilks[i];                       
         // ilk has been initialised
         require(ilk.rate != 0, "Vat/ilk-not-init");
 
-        urn.ink = _add(urn.ink, dink);                  // DAM: Add the change in collateral to the total locked up for that collateral type.
-        urn.art = _add(urn.art, dart);                  // DAM: Add the change in debt to the user's vault.
-        ilk.Art = _add(ilk.Art, dart);                  // DAM: Update the total debt for the collateral type.
+        // Add the change in collateral to the total locked up for that collateral type.
+        urn.ink = _add(urn.ink, dink);                  
+        // Add the change in debt to the user's vault.
+        urn.art = _add(urn.art, dart);
+        // Update the total debt for the collateral type.
+        ilk.Art = _add(ilk.Art, dart);                  
 
-        int dtab = _mul(ilk.rate, dart);                // DAM: Calculate what the normalised change in debt should be.
-        uint tab = _mul(ilk.rate, urn.art);             // DAM: Calculate the interset on the existing debt.
-        debt     = _add(debt, dtab);                    // DAM: Update the total normalised debt with the new normalised change.
+        // Calculate what the normalised debt should be.
+        // This method is called with the dart amount actually being the new_art / rate
+        // which is the amount that would have been deposited at time zero.
+        int dtab = _mul(ilk.rate, dart);                
+        //  Calculate the interset on the existing debt.
+        uint tab = _mul(ilk.rate, urn.art);             
+        //  Update the total normalised debt with the new normalised change.
+        debt     = _add(debt, dtab);                    
 
         // either debt has decreased, or debt ceilings are not exceeded
         require(either(dart <= 0, both(_mul(ilk.Art, ilk.rate) <= ilk.line, debt <= Line)), "Vat/ceiling-exceeded");
@@ -235,10 +265,13 @@ contract Vat {
         // urn has no debt, or a non-dusty amount
         require(either(urn.art == 0, tab >= ilk.dust), "Vat/dust");
 
-        gem[i][v] = _sub(gem[i][v], dink);              // DAM: Either debits or credits unlocked collateral. Whether dink is positive or negative.
-        dai[w]    = _add(dai[w],    dtab);              // DAM: Update the user's DAI balance.
+        // Either debits or credits unlocked collateral. Whether dink is positive or negative.
+        gem[i][v] = _sub(gem[i][v], dink);
+        //  Update the user's DAI balance.      
+        dai[w]    = _add(dai[w],    dtab);              
 
-        urns[i][u] = urn;                               // DAM: Update the urn and ilk.
+        // Update the urn and ilk.
+        urns[i][u] = urn;                               
         ilks[i]    = ilk;
     }
     // --- CDP Fungibility ---
@@ -301,12 +334,18 @@ contract Vat {
 
     // --- Rates ---
     // This recognises the accrued interest to date.
-    function fold(bytes32 i, address u, int rate) external auth {           // DAM: This is always called with `u` being the "vow" or protocol treasury.
+    // This is always called with `u` being the "vow" or protocol treasury.
+    function fold(bytes32 i, address u, int rate) external auth {           
         require(live == 1, "Vat/not-live");
-        Ilk storage ilk = ilks[i];                                          // DAM: Get the collateral type.
-        ilk.rate = _add(ilk.rate, rate);                                    // DAM: Add the rate from the param  (which is the difference between the previous rate and the new rate) to the current rate.
-        int rad  = _mul(ilk.Art, rate);                                     // DAM: Calcualate the new accrued interest. Note that we use `rate` instead of `rad`.
-        dai[u]   = _add(dai[u], rad);                                       // DAM: Add the accrued interest to vow's DAI balance. Which also grosses up the total DAI balance.
-        debt     = _add(debt,   rad);                                       // DAM: Add the accrued interest to the total debt balance. As an aside, total debt should equal total outstanding DAI.
+        // Get the collateral type.
+        Ilk storage ilk = ilks[i];
+        // Add the rate from the param  (which is the difference between the previous rate and the new rate) to the current rate.                                      
+        ilk.rate = _add(ilk.rate, rate);
+        // Calcualate the new accrued interest. Note that we use `rate` instead of `rad`.                                   
+        int rad  = _mul(ilk.Art, rate);
+        // Add the accrued interest to vow's DAI balance. Which also grosses up the total DAI balance.                                  
+        dai[u]   = _add(dai[u], rad);
+        // Add the accrued interest to the total debt balance. As an aside, total debt should equal total outstanding DAI.                                      
+        debt     = _add(debt,   rad);                                       
     }
 }
